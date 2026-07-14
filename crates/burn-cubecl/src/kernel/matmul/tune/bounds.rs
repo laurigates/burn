@@ -68,7 +68,7 @@ fn autotune_bounds<R: CubeRuntime>(
         client,
         ThroughputKey {
             mode: compute_mode,
-            dtype: compute.acc.elem_type(),
+            dtype: compute.input.elem_type(),
         },
     );
 
@@ -105,7 +105,11 @@ fn autotune_bounds<R: CubeRuntime>(
 /// kernel reaches.
 #[derive(Debug, Clone, Copy)]
 pub struct MatmulComputeThroughputSelection {
-    /// Accumulator register type: the element type the throughput probe should measure.
+    /// Input (lhs/rhs) register type: the element type the cmma probe multiplies. This is what the
+    /// throughput kernel loads into its A/B matrices, so it must be the input type (e.g. f16), not
+    /// the accumulator — a mismatch probes an unsupported cmma (e.g. f32 inputs) and underreports.
+    pub input: StorageType,
+    /// Accumulator register type: the element type the throughput probe accumulates into.
     pub acc: StorageType,
     /// The accelerated (cmma) tile `(m, n, k)` to measure, or `None` when the matmul will
     /// fall back to a non-accelerated (direct) kernel for this problem.
@@ -136,6 +140,7 @@ pub fn matmul_compute_throughput_selection<R: CubeRuntime>(
         .map(|tile| (tile.m(), tile.n(), tile.k()));
 
     MatmulComputeThroughputSelection {
+        input: elems.lhs_register,
         acc: elems.acc_register,
         cmma_tile,
     }
