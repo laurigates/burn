@@ -68,7 +68,11 @@ fn autotune_bounds<R: CubeRuntime>(
         client,
         ThroughputKey {
             mode: compute_mode,
-            dtype: compute.input.elem_type(),
+            dtype: match compute_mode {
+                ThroughputMode::ComputeCmma(_) => compute.input.elem_type(),
+                ThroughputMode::ComputeDirect => compute.acc.elem_type(),
+                ThroughputMode::Memory => unreachable!(),
+            },
         },
     );
 
@@ -127,14 +131,23 @@ pub fn matmul_compute_throughput_selection<R: CubeRuntime>(
 ) -> MatmulComputeThroughputSelection {
     let elems = MatmulElems::from_globals(&MatmulGlobalElems { lhs, rhs, out });
 
-    let cmma_tile = TileMatmulKind::Cmma
-        .supported_sizes(
-            client,
-            elems.lhs_register,
-            elems.rhs_register,
-            elems.acc_register,
-        )
+    let cmma_sizes = TileMatmulKind::Cmma.supported_sizes(
+        client,
+        elems.lhs_register,
+        elems.rhs_register,
+        elems.acc_register,
+    );
+
+    let mma_sizes = TileMatmulKind::Mma.supported_sizes(
+        client,
+        elems.lhs_register,
+        elems.rhs_register,
+        elems.acc_register,
+    );
+
+    let cmma_tile = cmma_sizes
         .into_iter()
+        .chain(mma_sizes)
         .filter(|tile| m >= tile.m() as usize && n >= tile.n() as usize && k >= tile.k() as usize)
         .max_by_key(|tile| tile.m() as u64 * tile.n() as u64 * tile.k() as u64)
         .map(|tile| (tile.m(), tile.n(), tile.k()));
