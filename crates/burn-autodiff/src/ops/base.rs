@@ -211,9 +211,11 @@ where
             self.compute_property,
         );
         // Ledger: map the output node to its op type (and parents) so
-        // checkpoint/consume events can be classed per op.
+        // checkpoint/consume events can be classed per op. The shape read
+        // stays behind enabled() so a ledger-off run pays one lazy Option
+        // check here, nothing more.
         #[cfg(feature = "std")]
-        {
+        if crate::ledger::enabled() {
             let shape = output.primitive.shape();
             ledger_event!(
                 "OP\t{:?}\t{}\t{:?}\t{:?}",

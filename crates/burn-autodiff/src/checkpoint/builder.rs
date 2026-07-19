@@ -92,8 +92,10 @@ impl CheckpointerBuilder {
         };
         match &tensor.node.properties {
             ComputingProperty::ComputeBound | ComputingProperty::Ambiguous => {
+                // The shape read stays behind enabled() so a ledger-off run
+                // pays exactly one lazy Option check here, nothing more.
                 #[cfg(feature = "std")]
-                {
+                if crate::ledger::enabled() {
                     let shape = tensor.primitive.shape();
                     ledger_event!(
                         "CKPT\t{:?}\t{action_label}\tComputed\t{}\t{:?}",
@@ -270,9 +272,12 @@ impl CheckpointerBuilder {
             };
         }
 
-        // Ledger: actions registered during forward but never required by any
-        // backward step. Their pinned clones (for Computed actions) were held
-        // for the whole forward and are released here.
+        // Ledger: actions left over after the build loop. A node id here was
+        // either never required by any backward step, OR is a duplicate
+        // action of a node that WAS built (the loop consumes exactly one
+        // action per required node). Consumers must treat a BUILD event for
+        // the same node as authoritative — only never-built ids represent
+        // memory held through forward and released here.
         #[cfg(feature = "std")]
         for action in self
             .explicit_actions

@@ -4,8 +4,9 @@
 //! file path, burn-autodiff appends one tab-separated line per
 //! retention-relevant event:
 //!
-//! - `OP\t<node>\t<op_type>\t<parent nodes>` — a tracked op finished; maps the
-//!   node id to the op's `Backward` type name so later events can be classed.
+//! - `OP\t<node>\t<op_type>\t<shape>\t<parent nodes>` — a tracked op
+//!   finished; maps the node id to the op's `Backward` type name and output
+//!   shape so later events can be classed.
 //! - `CKPT\t<node>\t<Explicit|Backup>\t<Computed|Recompute>\t<bytes>\t<shape>`
 //!   — a checkpoint action was registered during forward. A `Computed` action
 //!   clones the primitive (an Arc'd handle) **at this moment**, pinning the
@@ -15,9 +16,11 @@
 //!   because one of its parents is untracked
 //!   (`CheckpointingError::UntrackedParent`).
 //! - `BUILD\t<node>\t<Computed|Recompute>\t<n_required>` — the state map
-//!   insert when the checkpointer is built at backward start. Actions that were
-//!   registered but never required are logged as `DROP\t<node>` instead (their
-//!   pinned clone is released here, having been held for the whole forward).
+//!   insert when the checkpointer is built at backward start. Leftover
+//!   actions are logged as `DROP\t<node>`: a node never required by backward
+//!   (its pinned clone, held for the whole forward, is released here) — or a
+//!   duplicate action of a node that WAS built; a BUILD event for the same
+//!   node is authoritative over DROP.
 //! - `SAVE\t<node>\t<n_required>` — a recomputed output was materialized into
 //!   the state map during backward (retro-forward execution).
 //! - `CONSUME\t<node>\t<n_remaining>` — a backward step consumed the state;
