@@ -113,7 +113,13 @@ where
         let compute_property = match C::checkpoint_parents(parents, &mut self.checkpointer_builder)
         {
             Ok(..) => self.compute_property,
-            Err(..) => ComputingProperty::ComputeBound,
+            Err(..) => {
+                // Ledger: a memory-bound op with an untracked parent is forced
+                // compute-bound — its output will be eagerly cloned when
+                // checkpointed instead of recomputed.
+                ledger_event!("FALLBACK\t{}", core::any::type_name::<BO>());
+                ComputingProperty::ComputeBound
+            }
         };
 
         OpsPrep::new(
@@ -198,12 +204,28 @@ where
 {
     /// Finish the preparation of a tracked operation and returns the output tensor.
     pub fn finish(self, state: S, output: FloatTensor<B>) -> AutodiffTensor<B> {
-        let output = AutodiffTensor::from_parents(
+        let output: AutodiffTensor<B> = AutodiffTensor::from_parents(
             output,
             &self.nodes,
             self.requirement,
             self.compute_property,
         );
+        // Ledger: map the output node to its op type (and parents) so
+        // checkpoint/consume events can be classed per op.
+        #[cfg(feature = "std")]
+        {
+            let shape = output.primitive.shape();
+            ledger_event!(
+                "OP\t{:?}\t{}\t{:?}\t{:?}",
+                output.node.id,
+                core::any::type_name::<BO>(),
+                shape.as_slice(),
+                self.nodes
+                    .iter()
+                    .map(|node| node.id)
+                    .collect::<alloc::vec::Vec<_>>(),
+            );
+        }
         let parents = self.nodes.map(|node| node.clone_if_require_grad());
         let ops = Ops::new(parents, output.node.clone(), state);
 

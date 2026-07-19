@@ -82,6 +82,7 @@ impl BackwardStates {
         // Fetch the state and decrement its number of required
         let state = self.map.remove(node_id).unwrap();
         let remaining_n_required = state.n_required() - 1;
+        ledger_event!("CONSUME\t{node_id:?}\t{remaining_n_required}");
 
         // Downcast the state to whatever it is supposed to be
         // If still needed after giving ownership, we copy it back to the hashmap
@@ -129,6 +130,7 @@ impl BackwardStates {
         T: Clone + Send + 'static,
     {
         let n_required = self.get_state_ref(&node_id).unwrap().n_required();
+        ledger_event!("SAVE\t{node_id:?}\t{n_required}");
         self.insert_state(
             node_id,
             State::Computed {

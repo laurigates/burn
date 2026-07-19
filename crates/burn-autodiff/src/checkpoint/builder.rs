@@ -5,6 +5,8 @@ use crate::{
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use burn_backend::Backend;
+#[cfg(feature = "std")]
+use burn_backend::TensorMetadata;
 use core::any::Any;
 
 use super::{
@@ -79,18 +81,37 @@ impl CheckpointerBuilder {
         tensor: &AutodiffTensor<B>,
         action_type: ActionType,
     ) {
+        #[cfg(feature = "std")]
+        let action_label = match &action_type {
+            ActionType::Explicit => "Explicit",
+            ActionType::Backup => "Backup",
+        };
         let action_list = match action_type {
             ActionType::Explicit => &mut self.explicit_actions,
             ActionType::Backup => &mut self.backup_actions,
         };
         match &tensor.node.properties {
             ComputingProperty::ComputeBound | ComputingProperty::Ambiguous => {
+                #[cfg(feature = "std")]
+                {
+                    let shape = tensor.primitive.shape();
+                    ledger_event!(
+                        "CKPT\t{:?}\t{action_label}\tComputed\t{}\t{:?}",
+                        tensor.node.id,
+                        shape.num_elements() * core::mem::size_of::<B::FloatElem>(),
+                        shape.as_slice(),
+                    );
+                }
                 action_list.push(CheckpointingAction::Computed {
                     node_id: tensor.node.id,
                     state_content: Box::new(tensor.primitive.clone()),
                 })
             }
             ComputingProperty::MemoryBound { retro_forward } => {
+                ledger_event!(
+                    "CKPT\t{:?}\t{action_label}\tRecompute\t0\t[]",
+                    tensor.node.id
+                );
                 action_list.push(CheckpointingAction::Recompute {
                     node_id: tensor.node.id,
                     retro_forward: retro_forward.clone(),
@@ -220,7 +241,7 @@ impl CheckpointerBuilder {
                         .iter()
                         .position(|action| action.id() == node_id);
                     self.backup_actions.remove(pos.unwrap_or_else(|| {
-                        panic!("Node {:?} is needed but never checkpointed", &node_id)
+                        panic!("Node {:?} is needed but never checkpointed", node_id)
                     }))
                 }
             };
@@ -230,19 +251,35 @@ impl CheckpointerBuilder {
                     node_id: _,
                     state_content,
                 } => {
+                    ledger_event!("BUILD\t{node_id:?}\tComputed\t{n_required}");
                     self.checkpoint_compute(backward_states_map, node_id, state_content, n_required)
                 }
                 CheckpointingAction::Recompute {
                     node_id: _,
                     retro_forward,
-                } => self.checkpoint_lazy(
-                    backward_states_map,
-                    retro_forward_map,
-                    node_id,
-                    retro_forward,
-                    n_required,
-                ),
+                } => {
+                    ledger_event!("BUILD\t{node_id:?}\tRecompute\t{n_required}");
+                    self.checkpoint_lazy(
+                        backward_states_map,
+                        retro_forward_map,
+                        node_id,
+                        retro_forward,
+                        n_required,
+                    )
+                }
             };
+        }
+
+        // Ledger: actions registered during forward but never required by any
+        // backward step. Their pinned clones (for Computed actions) were held
+        // for the whole forward and are released here.
+        #[cfg(feature = "std")]
+        for action in self
+            .explicit_actions
+            .iter()
+            .chain(self.backup_actions.iter())
+        {
+            ledger_event!("DROP\t{:?}", action.id());
         }
     }
 

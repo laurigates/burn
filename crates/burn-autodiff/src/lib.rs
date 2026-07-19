@@ -14,6 +14,26 @@ extern crate derive_new;
 
 extern crate alloc;
 
+/// Emit a retention-ledger event line (see the [`ledger`] module). Compiles to
+/// nothing on no_std; a single lazily-initialized check when the env var is
+/// unset. Must be defined before the modules that use it (textual scope).
+#[cfg(feature = "std")]
+macro_rules! ledger_event {
+    ($($arg:tt)*) => {
+        if crate::ledger::enabled() {
+            crate::ledger::log(format_args!($($arg)*));
+        }
+    };
+}
+#[cfg(not(feature = "std"))]
+macro_rules! ledger_event {
+    ($($arg:tt)*) => {};
+}
+
+/// Opt-in retention-ledger instrumentation (loractl#132).
+#[cfg(feature = "std")]
+pub mod ledger;
+
 /// Checkpoint module.
 pub mod checkpoint;
 #[cfg(feature = "distributed")]
